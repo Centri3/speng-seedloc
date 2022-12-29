@@ -1,0 +1,9 @@
+[package]
+name = "seedloc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+seedloc-handler = { path = "../seedloc-handler" }
+rand = "0.8.5"
+winput = "0.2.5"
