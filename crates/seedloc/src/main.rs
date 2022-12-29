@@ -141,7 +141,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let now = Instant::now();
             // Wait until systems found == max systems found, or until 10s has passed
             while HANDLER.read::<u32>(base + STAR_BROWSER_STAR_LIST_LEN) < star_list_max
-                || now.elapsed().as_secs_f32() > 10.0f32
+                && now.elapsed().as_secs_f32() < 10.0f32
             {}
 
             // Stop search *hopefully* before it begins.
@@ -206,7 +206,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let seed = seed((x, y, z));
 
                 if seeds.contains(&seed) {
-                    finds.write_all(format!("CODE: {code}, SEED: {seed}").as_bytes())?;
+                    finds.write_all(format!("CODE: {code}, SEED: {seed}\n").as_bytes())?;
                 }
             }
         }
