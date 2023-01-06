@@ -92,8 +92,22 @@ fn main() -> Result<(), Box<dyn Error>> {
                 continue;
             }
 
+            let lat = rng.gen_range(-180.0f32..180.0f32);
+            let dist_rad = rng.gen_range(0.2f32..0.5f32);
+
             // Goto the selected galaxy. If we've gotten this far, it's a desired galaxy
-            HANDLER.run_script("goto_galaxy.se", "Goto { DistRad 0 Time 0 }");
+            HANDLER.run_script(
+                "goto_galaxy_closer.se",
+                format!("Goto {{ Lat {lat} Lon 90 Time 0 }}"),
+            );
+
+            thread::sleep(Duration::from_millis(160u64));
+
+            // DistRad and Lat/Lon don't work together, for some reason
+            HANDLER.run_script(
+                "goto_galaxy_closer.se",
+                format!("Goto {{ DistRad {dist_rad} Time 0 }}"),
+            );
 
             thread::sleep(Duration::from_millis(160u64));
 
