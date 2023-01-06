@@ -97,7 +97,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             // Goto the selected galaxy. If we've gotten this far, it's a desired galaxy
             HANDLER.run_script(
-                "goto_galaxy_closer.se",
+                "goto_galaxy.se",
                 format!("Goto {{ Lat {lat} Lon 90 Time 0 }}"),
             );
 
