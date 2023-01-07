@@ -121,8 +121,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 true => diff *= 0.9f32,
                 false => diff *= 1.1f32,
             };
-
-            println!("{diff}");
         }
 
         let lat = 15.0f32 * diff;
