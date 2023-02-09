@@ -9,9 +9,8 @@ use {
         fs::{self, File},
         io::Write,
         thread,
-        time::{Duration, Instant},
+        time::Duration,
     },
-    winput::{press, release, Button, Mouse},
 };
 
 // Address to the code of the selected object.
@@ -19,51 +18,41 @@ use {
 const SELECTED_OBJECT_CODE: usize = 0x19a9e40usize;
 // Pointer to the parameters of the selected object.
 const SELECTED_OBJECT_POINTER: usize = 0x19a9ec0usize;
-// Address for the Star browser's search radius.
-const STAR_BROWSER_SEARCH_RADIUS: usize = 0x104a058usize;
-// Pointer to stars the Star browser found. seedloc will read this
-const STAR_BROWSER_STARS_POINTER: usize = 0x1024440usize;
-// Number of stars the Star browser has found
-const STAR_BROWSER_STAR_LIST_LEN: usize = 0x102410cusize;
-// Max stars the Star browser will search
-const STAR_BROWSER_STAR_LIST_MAX: usize = 0x1024430usize;
-// Whether the Star browser's currently searching; 0 = searching, 1 = idle
-const STAR_BROWSER_SEARCHING: usize = 0x104a181usize;
-// SE's current GUI scale.
-const GUI_SCALE: usize = 0xe69434;
+// Pointer to the star node cache.
+const STAR_NODE_CACHE_POINTER: usize = 0x7b9eb8;
 
 // Offsets from SELECTED_OBJECT_POINTER
 const GALAXY_TYPE: usize = 0x8usize;
 const GALAXY_SIZE: usize = 0x20usize;
-
-// Coordinates to some GUI elements.
-// These are always the same whenever ran, despite being initialized at runtime.
-const STAR_BROWSER_SEARCH_BUTTON: usize = 0x1025a78usize;
-const STAR_BROWSER_CLEAR_BUTTON: usize = 0x1025d60usize;
-
-// Coordinates offsets
-const GENERIC_OFFSET: i32 = 0xai32;
-const WINDOWED_OFFSET: i32 = 0x14i32;
-
-fn dist(rad: f32, start_lat: f32, start_lon: f32, end_lat: f32, end_lon: f32) -> f32 {
-    let d_lat = (end_lat - start_lat).to_radians();
-    let d_lon = (end_lon - start_lon).to_radians();
-    let lat_1 = (start_lat).to_radians();
-    let lat_2 = (end_lat).to_radians();
-
-    let a = ((d_lat / 2.0f32).sin()) * ((d_lat / 2.0f32).sin())
-        + ((d_lon / 2.0f32).sin()) * ((d_lon / 2.0f32).sin()) * (lat_1.cos()) * (lat_2.cos());
-
-    rad * 2.0 * ((a.sqrt()).atan2((1.0f32 - a).sqrt()))
-}
+const GALAXY_INDEX: usize = 0x66usize;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut finds = File::create("finds.log")?;
 
-    let seeds = fs::read_to_string("seeds.txt")?
-        .split(' ')
-        .map(|s| s.parse::<i32>().unwrap())
-        .collect::<Vec<i32>>();
+    let seeds_txt = fs::read_to_string("seeds.txt")?;
+    // What the fuck
+    let seeds = seeds_txt
+        .lines()
+        .map(|l| {
+            // This will split at whitespace, can't use .split_whitespace() because
+            // .as_str() isn't stable! <https://github.com/rust-lang/rust/issues/77998>
+            let line = l.split_once(' ').unwrap();
+
+            // Isolate both the seed and types of stars
+            let seed = line.0;
+            let types = line.1;
+
+            (
+                seed.parse::<i32>().unwrap(),
+                // Since we used .split_once() earlier, we can .split() again to get an iterator
+                // over each star type. Spaghetti, but it works!
+                types
+                    .split(' ')
+                    .map(|t| t.parse::<u16>().unwrap())
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect::<Vec<(_, Vec<_>)>>();
 
     let mut rng = thread_rng();
     // This is easier to write 1000 times.
@@ -90,114 +79,72 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         thread::sleep(Duration::from_millis(160u64));
 
+        // Get the address to the selected object
         let selected_object = HANDLER.read::<usize>(base + SELECTED_OBJECT_POINTER);
 
         // This could mean that the galaxy doesn't exist, or my code is too fast. Skip.
-        // Also, skip any galaxies with a type of E/Irr or isn't 10% of max size
+        // Also, skip any galaxies with a type of E/Irr or isn't 25% of max size
         if selected_object == 0usize
             || (1u32..=8u32).contains(&HANDLER.read(selected_object + GALAXY_TYPE))
             || HANDLER.read::<u32>(selected_object + GALAXY_TYPE) == 16u32
-            || HANDLER.read::<f32>(selected_object + GALAXY_SIZE) <= 5000.0f32
+            || HANDLER.read::<f32>(selected_object + GALAXY_SIZE) <= 12500.0f32
         {
             continue;
         }
 
-        let search_radius = HANDLER.read::<f64>(base + STAR_BROWSER_SEARCH_RADIUS) as f32;
-        let galaxy_size = HANDLER.read::<f32>(selected_object + GALAXY_SIZE);
-        let dist_rad = rng.gen_range(0.2f32..0.5f32);
-        let mut diff = 1.0f32;
-
-        // Iterate upon lat, DEFINITELY not the best way to do this but it works
-        for _ in 0i32..100i32 {
-            let dist = dist(
-                galaxy_size * dist_rad,
-                0.0f32,
-                90.0f32,
-                15.0f32 * diff,
-                90.0f32,
-            );
-
-            match dist > search_radius * 1.1f32 {
-                true => diff *= 0.9f32,
-                false => diff *= 1.1f32,
-            };
-        }
-
-        let lat = 15.0f32 * diff;
-        let lon = 90.0f32;
-
-        // Go to the same galaxy as many times as we can
-        for i in 0i32..(180.0f32 / lat) as i32 {
-            // Goto the selected galaxy. If we've gotten this far, it's a desired galaxy
+        // Goto the same galaxy 4 times, this is so we can load as much of the galaxy at
+        // once as possible. Only once is needed, but the later 3 help load more stars
+        for i in 0i32..4i32 {
             HANDLER.run_script(
                 "goto_galaxy.se",
-                format!("Goto {{ Lat {} Lon {lon} Time 0 }}", lat * i as f32),
+                format!("Goto {{ Lat {} Lon 90 Time 0 }}", 90.0f32 * i as f32),
             );
 
             thread::sleep(Duration::from_millis(80u64));
 
             // DistRad and Lat/Lon don't work together, for some reason
-            HANDLER.run_script(
-                "goto_galaxy_closer.se",
-                format!("Goto {{ DistRad {dist_rad} Time 0 }}"),
-            );
+            HANDLER.run_script("goto_galaxy_closer.se", "Goto { DistRad 0.4 Time 0 }");
 
-            thread::sleep(Duration::from_millis(80u64));
+            // We must wait to let SE load in stars, this sometimes silently
+            // fails (it takes forever to load), so we will wait only a tiny bit
+            thread::sleep(Duration::from_millis(320u64));
+        }
 
-            // This is still vile.
-            let scale = HANDLER.read::<f32>(base + GUI_SCALE);
-            let search = (
-                (HANDLER.read::<f32>(base + STAR_BROWSER_SEARCH_BUTTON) * scale) as i32
-                    + GENERIC_OFFSET,
-                (HANDLER.read::<f32>(base + STAR_BROWSER_SEARCH_BUTTON + 0x4) * scale) as i32
-                    + GENERIC_OFFSET
-                    + WINDOWED_OFFSET,
-            );
-            let clear = (
-                (HANDLER.read::<f32>(base + STAR_BROWSER_CLEAR_BUTTON) * scale) as i32
-                    + GENERIC_OFFSET,
-                (HANDLER.read::<f32>(base + STAR_BROWSER_CLEAR_BUTTON + 0x4) * scale) as i32
-                    + GENERIC_OFFSET
-                    + WINDOWED_OFFSET,
-            );
+        // Index of the galaxy into the star node cache, I think...
+        let galaxy_index = HANDLER.read::<u8>(selected_object + GALAXY_INDEX);
+        // Pointer to the star node cache
+        let star_node_cache = HANDLER.read::<usize>(base + STAR_NODE_CACHE_POINTER);
 
-            Mouse::set_position(clear.0, clear.1)?;
+        // Get the address to the galaxy's sectors
+        let galaxy_sectors = HANDLER
+            .read::<usize>(star_node_cache + galaxy_index as usize * 0x1b0usize + 0x130usize);
 
-            for _ in 0u32..=2u32 {
-                press(Button::Left);
+        // I'm roughly certain 30000 is a little over the max id for a sector
+        for i in 0usize..30000usize {
+            // Each sector's size is 900 bytes
+            let sector = galaxy_sectors + (i * 0x60usize);
 
-                thread::sleep(Duration::from_millis(32u64));
+            // Address to the top level star node
+            let star_node = HANDLER.read::<usize>(sector + 0x58usize);
 
-                release(Button::Left);
+            // If the sector doesn't exist, its star node will equal NULL
+            if star_node == 0usize {
+                continue;
             }
 
-            Mouse::set_position(search.0, search.1)?;
+            // We can't overwrite the previous i here, as we need it when printing the
+            // star's code. So c it is! (Best letter of the alphabet. Fight me)
+            for c in 1usize..=8usize {
+                let child = HANDLER.read::<usize>(star_node + 0x8usize * c);
 
-            press(Button::Left);
+                println!("RS 0-{level}-{block}-{number}-{i}-{c}: {child:x}");
+            }
 
-            thread::sleep(Duration::from_millis(80u64));
+            panic!();
+        }
+    }
 
-            release(Button::Left);
-
-            let star_list_max = HANDLER.read::<u32>(base + STAR_BROWSER_STAR_LIST_MAX);
-            let star_list = HANDLER.read::<usize>(base + STAR_BROWSER_STARS_POINTER);
-
-            let now = Instant::now();
-            // Wait until systems found == max systems found, or until 10s has passed
-            while HANDLER.read::<u32>(base + STAR_BROWSER_STAR_LIST_LEN) < star_list_max
-                && now.elapsed().as_secs_f32() < 10.0f32
-            {}
-
-            let now = Instant::now();
-            // Stop search *hopefully* before it begins. Also wait until it's set to 0 or 1s
-            // has passed
-            while HANDLER.read::<u8>(base + STAR_BROWSER_SEARCHING) == 1u8
-                && now.elapsed().as_secs_f32() < 1.0f32
-            {}
-
-            HANDLER.write(1u8, base + STAR_BROWSER_SEARCHING);
-
-            thread::sleep(Duration::from_millis(160u64));
+    /*
 
             for i in 0usize..HANDLER.read::<u32>(base + STAR_BROWSER_STAR_LIST_LEN) as _ {
                 let star = star_list + i * 0x78;
@@ -264,4 +211,5 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     }
+    */
 }
