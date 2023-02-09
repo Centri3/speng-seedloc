@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut finds = File::create("finds.log")?;
 
     let seeds_txt = fs::read_to_string("seeds.txt")?;
-    // What the fuck
+    // What the fuck (Oh the joys of programming)
     let seeds = seeds_txt
         .lines()
         .map(|l| {
