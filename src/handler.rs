@@ -1,77 +1,79 @@
+use bytemuck::Pod;
+use once_cell::sync::Lazy;
+use std::env;
+use std::fs::File;
+use std::io::Error;
 use std::io::Write;
+use std::mem;
+use std::path::PathBuf;
+use std::process::Command;
+use sysinfo::PidExt;
+use sysinfo::ProcessExt;
+use sysinfo::System;
+use sysinfo::SystemExt;
+use windows::Win32::Foundation::CloseHandle;
+use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Foundation::HINSTANCE;
+use windows::Win32::Foundation::MAX_PATH;
+use windows::Win32::System::Diagnostics::Debug;
+use windows::Win32::System::Memory;
+use windows::Win32::System::ProcessStatus;
+use windows::Win32::System::Threading::GetProcessId;
+use windows::Win32::System::Threading::OpenProcess;
+use windows::Win32::System::Threading::PROCESS_QUERY_INFORMATION;
+use windows::Win32::System::Threading::PROCESS_VM_OPERATION;
+use windows::Win32::System::Threading::PROCESS_VM_READ;
+use windows::Win32::System::Threading::PROCESS_VM_WRITE;
 
-use {
-    bytemuck::Pod,
-    once_cell::sync::Lazy,
-    std::{env, fs::File, io::Error, mem, path::PathBuf, process::Command},
-    windows::Win32::{
-        Foundation,
-        Foundation::{HANDLE, HINSTANCE, MAX_PATH},
-        System::{Diagnostics::Debug, Memory, ProcessStatus, Threading},
-    },
-};
+pub fn handler() -> &'static Handler {
+    static _SE_HANDLER: Lazy<Handler> = Lazy::new(|| {
+        let mut sys = System::new_all();
+        sys.refresh_all();
 
-pub static HANDLER: Lazy<Handler> = Lazy::new(Handler::init);
+        let pid = sys
+            .processes_by_exact_name("SpaceEngine.exe")
+            .next()
+            .expect("Where is SE ):")
+            .pid()
+            .as_u32();
 
-#[repr(transparent)]
-#[derive(Debug)]
-pub struct Handler {
-    inner: HANDLE,
+        unsafe {
+            Handler(
+                OpenProcess(
+                    PROCESS_QUERY_INFORMATION
+                        | PROCESS_VM_OPERATION
+                        | PROCESS_VM_READ
+                        | PROCESS_VM_WRITE,
+                    false,
+                    pid,
+                )
+                .unwrap(),
+            )
+        }
+    });
+
+    &_SE_HANDLER
 }
 
-// Not sure whether this is needed or not
+pub struct Handler(HANDLE);
+
 impl Drop for Handler {
     fn drop(&mut self) {
-        unsafe { Foundation::CloseHandle(self.inner) };
+        unsafe { CloseHandle(self.0).ok().expect("Failed to close handle") };
     }
 }
 
 impl Handler {
-    fn init() -> Self {
-        let processes = [0u32; 1024usize];
-        let mut bytes_needed = 0u32;
-
-        unsafe {
-            ProcessStatus::K32EnumProcesses(
-                processes.as_ptr() as _,
-                mem::size_of_val(&processes) as _,
-                &mut bytes_needed,
-            );
-        }
-
-        for process in &processes[..bytes_needed as usize / mem::size_of::<u32>()] {
-            let mut name = [0u16; MAX_PATH as _];
-            let handle = match unsafe {
-                Threading::OpenProcess(
-                    Threading::PROCESS_QUERY_INFORMATION
-                        | Threading::PROCESS_VM_OPERATION
-                        | Threading::PROCESS_VM_READ
-                        | Threading::PROCESS_VM_WRITE,
-                    false,
-                    *process,
-                )
-            } {
-                Ok(ph) => ph,
-                Err(_) => continue,
-            };
-
-            unsafe { ProcessStatus::K32GetModuleFileNameExW(handle, None, &mut name) };
-
-            if !String::from_utf16_lossy(&name).contains("SpaceEngine.exe") {
-                continue;
-            }
-
-            return Self { inner: handle };
-        }
-
-        panic!("failed to find process: SpaceEngine.exe, maybe try opening it!");
+    #[must_use]
+    pub fn pid(&self) -> u32 {
+        unsafe { GetProcessId(self.0) }
     }
 
     #[must_use]
     pub fn exe(&self) -> PathBuf {
         let mut exe = [0u16; MAX_PATH as _];
 
-        unsafe { ProcessStatus::K32GetModuleFileNameExW(self.inner, None, &mut exe) };
+        unsafe { ProcessStatus::K32GetModuleFileNameExW(self.0, None, &mut exe) };
 
         PathBuf::from(String::from_utf16_lossy(&exe).replace('\0', ""))
     }
@@ -88,7 +90,7 @@ impl Handler {
 
         unsafe {
             ProcessStatus::K32EnumProcessModules(
-                self.inner,
+                self.0,
                 modules.as_ptr() as _,
                 mem::size_of_val(&modules) as _,
                 &mut bytes_needed,
@@ -102,11 +104,7 @@ impl Handler {
             let mut name = [0u16; MAX_PATH as _];
 
             unsafe {
-                ProcessStatus::K32GetModuleBaseNameW(
-                    self.inner,
-                    HINSTANCE(*module as _),
-                    &mut name,
-                );
+                ProcessStatus::K32GetModuleBaseNameW(self.0, HINSTANCE(*module as _), &mut name);
             }
 
             if String::from_utf16_lossy(&name).contains(module_name) {
@@ -123,7 +121,7 @@ impl Handler {
 
         unsafe {
             if !Debug::ReadProcessMemory(
-                self.inner,
+                self.0,
                 base as _,
                 buffer.as_ptr() as _,
                 buffer.len(),
@@ -153,7 +151,7 @@ impl Handler {
 
         unsafe {
             if !Memory::VirtualProtectEx(
-                self.inner,
+                self.0,
                 base as _,
                 buffer.len(),
                 Memory::PAGE_EXECUTE_READWRITE,
@@ -169,7 +167,7 @@ impl Handler {
             }
 
             Debug::WriteProcessMemory(
-                self.inner,
+                self.0,
                 base as _,
                 buffer.as_ptr().cast(),
                 buffer.len(),
@@ -177,7 +175,7 @@ impl Handler {
             );
 
             Memory::VirtualProtectEx(
-                self.inner,
+                self.0,
                 base as _,
                 buffer.len(),
                 old_protection,
@@ -186,7 +184,7 @@ impl Handler {
 
             // This is entirely useless if some variable's being modified instead of
             // executable code, but I don't care.
-            Debug::FlushInstructionCache(self.inner, Some(base as _), buffer.len());
+            Debug::FlushInstructionCache(self.0, Some(base as _), buffer.len());
         }
     }
 

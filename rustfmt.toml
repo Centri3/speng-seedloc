@@ -1,3 +1,9 @@
+# Formatting will silently fail if rustfmt fails to reduce a string's width
 format_strings = true
-imports_granularity = "One"
+
+# Preference. These are just small things that slightly annoy me about rustfmt's defaults.
+control_brace_style = "ClosingNextLine"
+imports_granularity = "Item"
+match_block_trailing_comma = true
+merge_derives = false
 wrap_comments = true
