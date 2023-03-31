@@ -3,3 +3,11 @@ members = [
     "crates/seedloc",
     "crates/seedloc-dll",
 ]
+
+[profile.dev]
+overflow-checks = false
+panic = "abort"
+
+[profile.release]
+overflow-checks = false
+panic = "abort"

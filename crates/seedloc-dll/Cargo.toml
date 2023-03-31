@@ -7,7 +7,6 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-fixed = "1.23.0"
 retour = { git = "https://github.com/Hpmason/retour-rs" }
 
 [dependencies.windows]

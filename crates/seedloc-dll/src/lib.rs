@@ -1,3 +1,5 @@
+mod seed;
+
 use retour::static_detour;
 use std::arch::asm;
 use std::io::Write;
@@ -5,7 +7,6 @@ use std::mem::size_of;
 use std::mem::transmute;
 use std::ptr::addr_of_mut;
 use std::thread;
-use windows::Win32::System::Diagnostics::Debug::DebugBreak;
 use windows::Win32::System::ProcessStatus::K32EnumProcessModules;
 use windows::Win32::System::Threading::GetCurrentProcess;
 
@@ -62,7 +63,7 @@ fn hook(param_1: usize, param_2: usize, param_3: *mut i32, param_4: i32) {
     let num_stars = unsafe { rbx.cast::<u8>().add(0xD8usize).cast::<u32>().read() };
     let stars = unsafe { rbx.cast::<u8>().add(0xDCusize).cast::<usize>().read() };
 
-    if stars == 0usize {
+    if stars == 0usize || num_stars == 0u32 {
         return;
     }
 
@@ -71,11 +72,14 @@ fn hook(param_1: usize, param_2: usize, param_3: *mut i32, param_4: i32) {
     // A for loop breaks SE for some reason
     let mut i = 0u32;
     loop {
-        let mut log = std::fs::File::create(format!("S {sector}-{level}-{block}")).unwrap();
+        let mut log = std::fs::File::options()
+            .append(true)
+            .create(true)
+            .open("seedlochaha.log")
+            .unwrap();
 
-        i += 1u32;
         if i >= num_stars {
-            break;
+            return;
         }
 
         // +24 = system's main star
@@ -90,7 +94,6 @@ fn hook(param_1: usize, param_2: usize, param_3: *mut i32, param_4: i32) {
                 .read()
         };
 
-        // TODO: It doesn't get this correctly?
         let (star_x, star_y, star_z) = unsafe {
             stars
                 .cast::<u8>()
@@ -99,123 +102,129 @@ fn hook(param_1: usize, param_2: usize, param_3: *mut i32, param_4: i32) {
                 .read()
         };
 
-        // TODO: These are actually f64s...
         let (sector_x, sector_y, sector_z) = unsafe {
             rbx.cast::<u8>()
                 .add(0x60usize)
-                .cast::<(f32, f32, f32)>()
+                .cast::<(f64, f64, f64)>()
                 .read()
         };
 
         let (mut x, mut y, mut z) = (
-            (star_x + sector_x) as f64,
-            (star_y + sector_y) as f64,
-            (star_z + sector_z) as f64,
+            (star_x as f64 + sector_x),
+            (star_y as f64 + sector_y),
+            (star_z as f64 + sector_z),
         );
 
-        writeln!(
-            log,
-            "star_x: {star_x}, star_y: {star_y}, star_z: {star_z}, sector_x: {sector_x}, \
-             sector_y: {sector_y}, sector_z: {sector_z}"
-        );
-
-        let d_var13 = y * unsafe {
+        let x_double = y * unsafe {
             stack_coords_stuff
                 .cast::<u8>()
                 .add(0x110usize)
-                .cast::<f32>()
-                .read() as f64
+                .cast::<f64>()
+                .read()
         } + x * unsafe {
             stack_coords_stuff
                 .cast::<u8>()
                 .add(0xF8usize)
-                .cast::<f32>()
-                .read() as f64
+                .cast::<f64>()
+                .read()
         } + z * unsafe {
             stack_coords_stuff
                 .cast::<u8>()
                 .add(0x128usize)
-                .cast::<f32>()
-                .read() as f64
+                .cast::<f64>()
+                .read()
         };
 
-        let d_var3 = x * unsafe {
+        let y_double = x * unsafe {
             stack_coords_stuff
                 .cast::<u8>()
                 .add(0x100usize)
-                .cast::<f32>()
-                .read() as f64
+                .cast::<f64>()
+                .read()
         } + y * unsafe {
             stack_coords_stuff
                 .cast::<u8>()
                 .add(0x118usize)
-                .cast::<f32>()
-                .read() as f64
+                .cast::<f64>()
+                .read()
         } + z * unsafe {
             stack_coords_stuff
                 .cast::<u8>()
                 .add(0x130usize)
-                .cast::<f32>()
-                .read() as f64
+                .cast::<f64>()
+                .read()
         };
 
-        let xx = y * unsafe {
+        let z_double = x * unsafe {
             stack_coords_stuff
                 .cast::<u8>()
                 .add(0x108usize)
-                .cast::<f32>()
-                .read() as f64
-        } + x * unsafe {
+                .cast::<f64>()
+                .read()
+        } + y * unsafe {
             stack_coords_stuff
                 .cast::<u8>()
                 .add(0x120usize)
-                .cast::<f32>()
-                .read() as f64
+                .cast::<f64>()
+                .read()
         } + z * unsafe {
             stack_coords_stuff
                 .cast::<u8>()
                 .add(0x138usize)
-                .cast::<f32>()
-                .read() as f64
+                .cast::<f64>()
+                .read()
         };
 
-        let x = fun_140410ae0(d_var13);
-        let y = fun_140410ae0(d_var3);
-        let z = fun_140410ae0(xx);
+        let fun_140410ae0 =
+            unsafe { transmute::<_, unsafe extern "C" fn(f64) -> u128>(BASE + 0x410AE0usize) };
 
-        writeln!(log, "X: {x:X}\nY: {y:X}\nZ: {z:X}");
+        let x = unsafe { fun_140410ae0(x_double) };
+        let y = unsafe { fun_140410ae0(y_double) };
+        let z = unsafe { fun_140410ae0(z_double) };
 
-        break;
-    }
-}
+        let seed = seed::seed((x, y, z));
 
-fn fun_140410ae0(param_1: f64) -> u128 {
-    let abs = param_1.abs();
-
-    let d_var4 = f64::floor(abs * 1.52587890625e-05f64);
-    let mut d_var1 = abs - (d_var4 as i64 & 0xffffffffi64) as f64 * 65536.0f64;
-    let mut u_var2 = (d_var1 * 65536.0f64) as u64;
-    let mut u_var3 = (d_var4 as i64) << 0x20usize | u_var2 as i64 & 0xffffffffi64;
-    d_var1 -= (u_var2 & 0xffffffffu64) as f64 * 1.52587890625e-05f64;
-    u_var2 = (d_var1 * 2.0f64.powi(48i32)) as u64;
-    let mut u_var2 = ((d_var1 - (u_var2 & 0xffffffffu64) as f64 * 3.552713678800501e-15f64) as f64
-        * 1.208925819614629e+24f64) as i64
-        & 0xffffffffi64
-        | (u_var2 as i64) << 0x20usize;
-
-    if param_1.is_sign_negative() {
-        u_var3 = !u_var3;
-        u_var2 = !u_var2 + 1i64;
-
-        if u_var2 == 0i64 {
-            u_var3 += 1i64;
+        if i == 0 {
+            writeln!(
+                log,
+                "RS (CURRENTGALAXY)-{sector}-{level}-{block}-{i}\nX: {x:X}\nY: {y:X}\nZ: \
+                 {z:X}\nSEED: {seed:X}"
+            )
+            .unwrap();
         }
-    }
 
-    u128::from_le_bytes(
-        [u_var3.to_le_bytes(), u_var2.to_le_bytes()]
-            .concat()
-            .try_into()
-            .unwrap(),
-    )
+        i += 1u32;
+    }
 }
+
+// fn fun_140410ae0(param_1: f64) -> u128 {
+//     let abs = param_1.abs();
+//
+//     let d_var4 = f64::floor(abs * 1.52587890625e-05f64);
+//     let mut d_var1 = abs - (d_var4 as i64 & 0xffffffffi64) as f64 *
+// 65536.0f64;     let mut u_var2 = (d_var1 * 65536.0f64) as u64;
+//     let mut u_var3 = (d_var4 as i64) << 0x20usize | u_var2 as i64 &
+// 0xffffffffi64;     d_var1 -= (u_var2 & 0xffffffffu64) as f64 *
+// 1.52587890625e-05f64;     u_var2 = (d_var1 * 2.0f64.powi(48i32)) as u64;
+//     let mut u_var2 = ((d_var1 - (u_var2 & 0xffffffffu64) as f64 *
+// 3.552713678800501e-15f64)
+//         * 1.20892581961462e+24f64) as i64
+//         & 0xffffffffi64
+//         | (u_var2 as i64) << 0x20usize;
+//
+//     if param_1.is_sign_negative() {
+//         u_var3 = !u_var3;
+//         u_var2 = !u_var2 + 1i64;
+
+//         if u_var2 == 0i64 {
+//             u_var3 += 1i64;
+//         }
+//     }
+//
+//     u128::from_le_bytes(
+//         [u_var3.to_le_bytes(), u_var2.to_le_bytes()]
+//             .concat()
+//             .try_into()
+//             .unwrap(),
+//     )
+// }
