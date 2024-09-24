@@ -11,7 +11,6 @@ use {
         thread,
         time::{Duration, Instant},
     },
-    winput::{press, release, Button, Mouse},
 };
 
 // Address to the code of the selected object.
@@ -151,33 +150,23 @@ fn main() -> Result<(), Box<dyn Error>> {
                     + GENERIC_OFFSET,
                 (HANDLER.read::<f32>(base + STAR_BROWSER_SEARCH_BUTTON + 0x4) * scale) as i32
                     + GENERIC_OFFSET
-                    + WINDOWED_OFFSET,
             );
             let clear = (
                 (HANDLER.read::<f32>(base + STAR_BROWSER_CLEAR_BUTTON) * scale) as i32
                     + GENERIC_OFFSET,
                 (HANDLER.read::<f32>(base + STAR_BROWSER_CLEAR_BUTTON + 0x4) * scale) as i32
                     + GENERIC_OFFSET
-                    + WINDOWED_OFFSET,
             );
 
-            Mouse::set_position(clear.0, clear.1)?;
-
             for _ in 0u32..=2u32 {
-                press(Button::Left);
-
-                thread::sleep(Duration::from_millis(32u64));
-
-                release(Button::Left);
+                HANDLER.click(clear.0, clear.1);
             }
 
-            Mouse::set_position(search.0, search.1)?;
+            thread::sleep(Duration::from_millis(160));
 
-            press(Button::Left);
+            HANDLER.click(search.0, search.1);
 
-            thread::sleep(Duration::from_millis(80u64));
-
-            release(Button::Left);
+            thread::sleep(Duration::from_millis(160));
 
             let star_list_max = HANDLER.read::<u32>(base + STAR_BROWSER_STAR_LIST_MAX);
             let star_list = HANDLER.read::<usize>(base + STAR_BROWSER_STARS_POINTER);
