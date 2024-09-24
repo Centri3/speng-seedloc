@@ -3,11 +3,15 @@ use std::io::Write;
 use {
     bytemuck::Pod,
     once_cell::sync::Lazy,
-    std::{env, fs::File, io::Error, sync::OnceLock, ffi::OsString, os::windows::ffi::OsStringExt, mem, path::PathBuf, process::Command},
+    std::{
+        env, ffi::OsString, fs::File, io::Error, mem, os::windows::ffi::OsStringExt, path::PathBuf,
+        process::Command, sync::OnceLock,
+    },
     windows::Win32::{
         Foundation,
-        Foundation::{HANDLE, HINSTANCE, HWND, MAX_PATH, LPARAM, WPARAM, BOOL},
-        System::{Diagnostics::Debug, Memory, ProcessStatus, Threading},UI::WindowsAndMessaging::{
+        Foundation::{BOOL, HANDLE, HINSTANCE, HWND, LPARAM, MAX_PATH, WPARAM},
+        System::{Diagnostics::Debug, Memory, ProcessStatus, Threading},
+        UI::WindowsAndMessaging::{
             EnumWindows, GetWindowTextLengthW, GetWindowTextW, SendMessageW, WM_LBUTTONDOWN,
             WM_LBUTTONUP, WNDENUMPROC,
         },
@@ -69,9 +73,9 @@ impl Handler {
             unsafe extern "system" fn enum_window(hwnd: HWND, _: LPARAM) -> BOOL {
                 let length = GetWindowTextLengthW(hwnd);
                 let mut bytes = vec![0u16; length as usize];
-    
+
                 GetWindowTextW(hwnd, &mut bytes);
-    
+
                 if OsString::from_wide(&bytes)
                     .into_string()
                     .unwrap()
@@ -79,15 +83,18 @@ impl Handler {
                 {
                     WINDOW_HWND.set(hwnd);
                 }
-    
+
                 return BOOL::from(true);
             }
-    
+
             unsafe {
                 EnumWindows(Some(enum_window), LPARAM(0isize)).unwrap();
             }
 
-            return Self { inner: handle,             hwnd: *WINDOW_HWND.get().unwrap(), };
+            return Self {
+                inner: handle,
+                hwnd: *WINDOW_HWND.get().unwrap(),
+            };
         }
 
         panic!("failed to find process: SpaceEngine.exe, maybe try opening it!");
@@ -235,24 +242,24 @@ impl Handler {
         Command::new(self.exe()).arg(path).spawn().unwrap();
     }
 
-        /// Click by sending a message.
-        pub fn click(&self, x: i32, y: i32) {
-            unsafe {
-                SendMessageW(
-                    self.hwnd,
-                    WM_LBUTTONDOWN,
-                    WPARAM(0usize),
-                    LPARAM(isize::overflowing_shl(y as isize, 16).0 | (x & 0xFFFF) as isize),
-                )
-            };
-    
-            unsafe {
-                SendMessageW(
-                    self.hwnd,
-                    WM_LBUTTONUP,
-                    WPARAM(0usize),
-                    LPARAM(isize::overflowing_shl(y as isize, 16).0 | (x & 0xFFFF) as isize),
-                )
-            };
-        }
+    /// Click by sending a message.
+    pub fn click(&self, x: i32, y: i32) {
+        unsafe {
+            SendMessageW(
+                self.hwnd,
+                WM_LBUTTONDOWN,
+                WPARAM(0usize),
+                LPARAM(isize::overflowing_shl(y as isize, 16).0 | (x & 0xFFFF) as isize),
+            )
+        };
+
+        unsafe {
+            SendMessageW(
+                self.hwnd,
+                WM_LBUTTONUP,
+                WPARAM(0usize),
+                LPARAM(isize::overflowing_shl(y as isize, 16).0 | (x & 0xFFFF) as isize),
+            )
+        };
+    }
 }

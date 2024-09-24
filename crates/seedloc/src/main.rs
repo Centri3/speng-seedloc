@@ -149,13 +149,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 (HANDLER.read::<f32>(base + STAR_BROWSER_SEARCH_BUTTON) * scale) as i32
                     + GENERIC_OFFSET,
                 (HANDLER.read::<f32>(base + STAR_BROWSER_SEARCH_BUTTON + 0x4) * scale) as i32
-                    + GENERIC_OFFSET
+                    + GENERIC_OFFSET,
             );
             let clear = (
                 (HANDLER.read::<f32>(base + STAR_BROWSER_CLEAR_BUTTON) * scale) as i32
                     + GENERIC_OFFSET,
                 (HANDLER.read::<f32>(base + STAR_BROWSER_CLEAR_BUTTON + 0x4) * scale) as i32
-                    + GENERIC_OFFSET
+                    + GENERIC_OFFSET,
             );
 
             for _ in 0u32..=2u32 {
